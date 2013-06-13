@@ -4,9 +4,12 @@
 #include<algorithm>
 #include<functional>
 #include<cstdlib>
+#include<cmath>
 #include<ctime>
 #include<mpi.h>
-#define TAG 1
+#define TAG_0 1
+#define TAG_1 1000
+#define TAG_2 2000
 
 using namespace std;
 
@@ -27,51 +30,58 @@ int main(int argc, char *argv[]){
   srand((unsigned)time(NULL)+(unsigned)com_rank);
   vector<int> m;
   vector<int> tmp;
-  vector<int> next;
   for(size_t i=0; i<size; i++)m.push_back(rand());
 
   // sort
   for(int division_unit = com_size; division_unit > 1;){
     int pivot;
     tmp.clear();
-    for(int i=0;i<m.size()/10;i++)tmp.push_back(m[(int)((rand()/((double)RAND_MAX+1.0)) * m.size())]);
+    for(int i=0;i<sqrt(m.size());i++)tmp.push_back(m[(int)((rand()/((double)RAND_MAX+1.0)) * m.size())]);
     sort(tmp.begin(), tmp.end());
-    pivot = tmp[size/20];
+    pivot = tmp[sqrt(m.size())/2];
     
     if(com_rank%division_unit == 0){
       for(int j = com_rank+1; j<com_rank+division_unit; j++)
-	MPI::COMM_WORLD.Isend(&(*m.begin()), 1, MPI::INT, j, TAG);
+	MPI::COMM_WORLD.Isend(&(*m.begin()), 1, MPI::INT, j, TAG_0);
     }else{
-      MPI::COMM_WORLD.Recv(&pivot, 1, MPI::INT, (com_rank/division_unit)*division_unit, TAG);
+      MPI::COMM_WORLD.Recv(&pivot, 1, MPI::INT, (com_rank/division_unit)*division_unit, TAG_0);
     }
-    vector<int>::iterator greater_half = partition(m.begin(), m.end(), bind2nd(less<int>(), pivot));
-    size_t lthalf_datasize = greater_half - m.begin();
-    size_t gthalf_datasize = m.size() - lthalf_datasize;
-    vector<int>::iterator lesser_half = m.begin();
+
     division_unit /= 2;
     int receive_datasize;
     if((com_rank/division_unit)%2 == 0){
-      MPI::COMM_WORLD.Recv(&receive_datasize, 1, MPI::INT, com_rank+division_unit, TAG);
-      next.clear();
-      next.resize(receive_datasize);
-      MPI::COMM_WORLD.Recv(&(*next.begin()), receive_datasize, MPI::INT, com_rank+division_unit, TAG);
+      vector<int>::iterator senddata = partition(m.begin(), m.end(), bind2nd(less<int>(), pivot));
+      size_t send_datasize = m.size() - (senddata - m.begin());
+      int send_to = com_rank+division_unit;
+
+      MPI::COMM_WORLD.Isend(&send_datasize, 1, MPI::INT, send_to, TAG_0);
+      MPI::Request req = MPI::COMM_WORLD.Isend(&(*senddata), send_datasize, MPI::INT, send_to, TAG_1);
+
+      MPI::COMM_WORLD.Recv(&receive_datasize, 1, MPI::INT, send_to, TAG_0);
+      tmp.clear();
+      tmp.resize(receive_datasize);
+      MPI::COMM_WORLD.Recv(&(*tmp.begin()), receive_datasize, MPI::INT, send_to, TAG_2);
+      m.resize(m.size()-send_datasize);
+      req.Wait();
       
-      MPI::COMM_WORLD.Isend(&gthalf_datasize, 1, MPI::INT, com_rank+division_unit, TAG);
-      MPI::COMM_WORLD.Isend(&(*greater_half), gthalf_datasize, MPI::INT, com_rank+division_unit, TAG);
-      
-      next.insert(next.end(), m.begin(), m.begin() + lthalf_datasize);
+      m.insert(m.end(), tmp.begin(), tmp.end());
     }else{
-      MPI::COMM_WORLD.Isend(&lthalf_datasize, 1, MPI::INT, com_rank-division_unit, TAG);
-      MPI::COMM_WORLD.Isend(&(*lesser_half), lthalf_datasize, MPI::INT, com_rank-division_unit, TAG);
+      vector<int>::iterator senddata = partition(m.begin(), m.end(), bind2nd(greater_equal<int>(), pivot));
+      size_t send_datasize = m.size() - (senddata - m.begin());
+      int send_to = com_rank-division_unit;
+     
+      MPI::COMM_WORLD.Isend(&send_datasize, 1, MPI::INT, send_to, TAG_0);
+      MPI::Request req = MPI::COMM_WORLD.Isend(&(*senddata), send_datasize, MPI::INT, send_to, TAG_2);
+
+      MPI::COMM_WORLD.Recv(&receive_datasize, 1, MPI::INT, send_to, TAG_0);
+      tmp.clear();
+      tmp.resize(receive_datasize);
+      MPI::COMM_WORLD.Recv(&(*tmp.begin()), receive_datasize, MPI::INT, send_to, TAG_1);
+      m.resize(m.size()-send_datasize);
+      req.Wait();
       
-      MPI::COMM_WORLD.Recv(&receive_datasize, 1, MPI::INT, com_rank-division_unit, TAG);
-      next.clear();
-      next.resize(receive_datasize);
-      MPI::COMM_WORLD.Recv(&(*next.begin()), receive_datasize, MPI::INT, com_rank-division_unit, TAG);
-      
-      next.insert(next.end(), greater_half, m.end());
+      m.insert(m.end(), tmp.begin(), tmp.end());
     }
-    m.swap(next);
   }
   sort(m.begin(), m.end());
 
@@ -80,12 +90,12 @@ int main(int argc, char *argv[]){
   if(com_rank == 0){
     for(size_t i=0; i<m.size(); i++)cout << m[i] << endl;
     // for(size_t i=0; i<m.size(); i++)cout << "[0]" << m[i] << endl;
-    if(com_rank != com_last)MPI::COMM_WORLD.Send(&signal, 1, MPI::INT, com_rank+1, TAG);
+    if(com_rank != com_last)MPI::COMM_WORLD.Send(&signal, 1, MPI::INT, com_rank+1, TAG_0);
   }else{
-    MPI::COMM_WORLD.Recv(&signal, 1, MPI::INT, com_rank-1, TAG);
+    MPI::COMM_WORLD.Recv(&signal, 1, MPI::INT, com_rank-1, TAG_0);
     for(size_t i=0; i<m.size(); i++)cout << m[i] << endl;
     // for(size_t i=0; i<m.size(); i++)cout << "[" << com_rank << "]" << m[i] << endl;
-    if(com_rank != com_last)MPI::COMM_WORLD.Send(&signal, 1, MPI::INT, com_rank+1, TAG);
+    if(com_rank != com_last)MPI::COMM_WORLD.Send(&signal, 1, MPI::INT, com_rank+1, TAG_0);
   }
 
   MPI::Finalize();
