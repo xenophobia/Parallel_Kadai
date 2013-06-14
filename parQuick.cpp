@@ -5,10 +5,11 @@
 #include<cstdlib>
 #include<cmath>
 #include<ctime>
+#include<cstring>
 #include<mpi.h>
-#define TAG_0 1
-#define TAG_1 1000
-#define TAG_2 2000
+#define TAG_0 1000
+#define TAG_1 2000
+#define TAG_2 3000
 
 using namespace std;
 
@@ -60,7 +61,7 @@ int main(int argc, char *argv[]){
       size = rest_datasize + receive_datasize;
       MPI::COMM_WORLD.Recv(tmp, receive_datasize, MPI::INT, send_to, TAG_2);
       req.Wait();
-      copy(tmp, tmp+receive_datasize, m+rest_datasize);
+      memcpy(m+rest_datasize, tmp, receive_datasize*sizeof(int));
     }else{
       int *senddata = (int *)partition(m, m+size, bind2nd(greater_equal<int>(), pivot));
       size_t rest_datasize = senddata - m;
@@ -74,7 +75,7 @@ int main(int argc, char *argv[]){
       size = rest_datasize + receive_datasize;
       MPI::COMM_WORLD.Recv(tmp, receive_datasize, MPI::INT, send_to, TAG_1);
       req.Wait();
-      copy(tmp, tmp+receive_datasize, m+rest_datasize);
+      memcpy(m+rest_datasize, tmp, receive_datasize*sizeof(int));
     }
   }
   sort(m, m+size);
